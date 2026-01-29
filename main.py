@@ -160,47 +160,6 @@ class BackupDBAgent:
             self.sql_agent.load_schema_context(schema_summary)
         print("✅ Schema refreshed!\n")
     
-    def _generate_styled_html_table(self, df) -> str:
-        """
-        Generate a beautifully styled HTML table from DataFrame.
-        
-        Args:
-            df: DataFrame to convert
-            
-        Returns:
-            str: HTML table with inline CSS styling
-        """
-        # Start HTML table with styling
-        html = ['<div style="overflow-x: auto;">']
-        html.append('<table style="border-collapse: collapse; width: 100%; font-family: Arial, sans-serif; font-size: 14px;">')
-        
-        # Table header
-        html.append('  <thead>')
-        html.append('    <tr style="background-color: #2c3e50; color: white;">')
-        for col in df.columns:
-            html.append(f'      <th style="border: 1px solid #ddd; padding: 12px; text-align: left; font-weight: bold;">{col}</th>')
-        html.append('    </tr>')
-        html.append('  </thead>')
-        
-        # Table body
-        html.append('  <tbody>')
-        for idx, row in df.iterrows():
-            # Alternate row colors
-            bg_color = '#f9f9f9' if idx % 2 == 0 else '#ffffff'
-            html.append(f'    <tr style="background-color: {bg_color};">')
-            for val in row:
-                # Truncate long values
-                display_val = str(val)
-                if len(display_val) > 50:
-                    display_val = display_val[:47] + '...'
-                html.append(f'      <td style="border: 1px solid #ddd; padding: 10px; text-align: left;">{display_val}</td>')
-            html.append('    </tr>')
-        html.append('  </tbody>')
-        
-        html.append('</table>')
-        html.append('</div>')
-        
-        return '\n'.join(html)
     
     def _save_result_to_file(self, user_query: str, sql: str, df) -> str:
         """
@@ -256,29 +215,25 @@ class BackupDBAgent:
         # Prepare display DataFrame
         df_display = df.fillna('')
         
-        # Format the full table with HTML for better styling
+        # Add table section
         content.append(f"### Data Table\n")
         
-        # Generate HTML table with styling
-        html_table = self._generate_styled_html_table(df_display)
-        content.append(html_table)
-        
-        # Also add a clean markdown version for compatibility
-        content.append("\n\n<details>")
-        content.append("<summary>📋 Click to view plain markdown table</summary>\n")
+        # Generate clean markdown table using tabulate
         try:
             from tabulate import tabulate
             table_md = tabulate(
                 df_display,
                 headers='keys',
-                tablefmt='github',
+                tablefmt='github',  # Clean GitHub-flavored markdown
                 showindex=False,
-                maxcolwidths=40
+                maxcolwidths=50  # Limit column width
             )
             content.append(table_md)
-        except:
-            content.append(df_display.to_markdown(index=False, max_colwidth=40))
-        content.append("\n</details>")
+        except Exception as e:
+            # Fallback to pandas markdown
+            content.append(df_display.to_markdown(index=False, max_colwidth=50))
+        
+        content.append("\n")  # Add spacing
         
         # Write markdown file
         with open(md_filepath, 'w', encoding='utf-8') as f:
@@ -373,12 +328,21 @@ class BackupDBAgent:
                         print(f"⚠️  Could not generate insights: {e}")
                 
                 # Try to generate visualization
-                chart_path = self.visualizer.auto_visualize(df, user_query)
-                if chart_path:
-                    import shutil
-                    new_chart_path = self.current_query_folder / "chart.png"
-                    shutil.move(chart_path, new_chart_path)
-                    print(f"   📈 chart.png  - Visualization")
+                try:
+                    chart_path = self.visualizer.auto_visualize(df, user_query)
+                    if chart_path:
+                        import shutil
+                        new_chart_path = self.current_query_folder / "chart.png"
+                        shutil.move(chart_path, new_chart_path)
+                        print(f"   📈 chart.png  - Visualization")
+                    else:
+                        # Explain why no chart was generated
+                        if len(df.columns) < 2:
+                            print(f"ℹ️  No visualization: Query has only 1 column (need at least 2 for charts)")
+                        else:
+                            print(f"ℹ️  No suitable visualization detected for this data")
+                except Exception as e:
+                    print(f"⚠️  Could not generate visualization: {e}")
                 
                 # Show AI suggestions
                 try:
