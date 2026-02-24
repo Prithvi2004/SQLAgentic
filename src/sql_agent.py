@@ -169,29 +169,42 @@ Corrected SQL Query:"""
         
         return sql
     
-    def validate_sql_safety(self, sql: str) -> bool:
+    def validate_sql_safety(self, sql: str):
         """
-        Check if SQL query contains destructive operations.
+        Enhanced SQL safety validation with comprehensive security checks.
         
         Args:
-            sql: SQL query string
-            
-        Returns:
-            bool: True if safe, False if contains destructive keywords
+            sql: SQL query to validate
             
         Raises:
-            SafetyViolationError: If destructive keywords found
+            SafetyViolationError: If query violates safety rules
         """
-        sql_upper = sql.upper()
+        from sql_safety_validator import SQLSafetyValidator, SafetyViolationError
         
-        for keyword in self.DESTRUCTIVE_KEYWORDS:
-            # Use word boundaries to avoid false positives
-            pattern = r'\b' + keyword + r'\b'
-            if re.search(pattern, sql_upper):
-                raise SafetyViolationError(
-                    f"🚫 SAFETY VIOLATION: Query contains destructive keyword '{keyword}'. "
-                    f"This agent is read-only and cannot execute write operations."
-                )
+        # Create validator (read-only by default)
+        validator = SQLSafetyValidator(allow_modifications=False)
+        
+        # Validate query
+        result = validator.validate(sql)
+        
+        # If critical issues found, raise error
+        if not result.is_safe:
+            error_msg = f"\n🚨 SQL SAFETY VIOLATION (Score: {result.score}/100)\n"
+            error_msg += "=" * 80 + "\n"
+            for issue in result.issues:
+                error_msg += f"❌ {issue}\n"
+            error_msg += "=" * 80
+            raise SafetyViolationError(error_msg)
+        
+        # If warnings, display them
+        if result.severity == 'warning' or result.suggestions:
+            print(f"\n⚠️  SQL Safety Check: {result.score}/100")
+            if result.issues:
+                for issue in result.issues:
+                    print(f"   ⚠️  {issue}")
+            if result.suggestions:
+                for suggestion in result.suggestions:
+                    print(f"   💡 {suggestion}")
         
         return True
     

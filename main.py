@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 from dotenv import load_dotenv
 from tabulate import tabulate
+import pandas as pd
 
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent / 'src'))
@@ -23,6 +24,11 @@ from performance_monitor import PerformanceMonitor
 from query_suggester import QuerySuggester
 from data_comparator import DataComparator
 from interactive_explorer import InteractiveExplorer
+
+# Critical Features
+from reasoning_engine import ReasoningEngine
+from query_cache import QueryCache
+from anomaly_detector import AnomalyDetector
 
 
 class BackupDBAgent:
@@ -47,6 +53,11 @@ class BackupDBAgent:
         self.explorer = None
         self.last_result = None
         self.show_insights = True
+        
+        # Critical Features
+        self.reasoning = None
+        self.cache = None
+        self.anomaly_detector = None
         
     def initialize(self):
         """Set up all components and load configuration."""
@@ -123,6 +134,17 @@ class BackupDBAgent:
         self.comparator = DataComparator()
         self.explorer = InteractiveExplorer()
         print("✅ All advanced features loaded!")
+        
+        # Initialize Critical Features
+        print("\n🚀 Initializing Critical Features...")
+        self.reasoning = ReasoningEngine()
+        self.cache = QueryCache(max_size_mb=100, ttl_seconds=3600)
+        self.anomaly_detector = AnomalyDetector()
+        print("✅ Critical features activated!")
+        print("   🧠 Chain-of-Thought Reasoning")
+        print("   ⚡ Query Result Caching")
+        print("   🔍 Anomaly Detection")
+        print("   ⚠️  Enhanced SQL Safety")
         
         print("\n" + "="*80)
         print("✅ BackupDB SQL Agent Ready!")
@@ -245,114 +267,69 @@ class BackupDBAgent:
         return str(md_filepath)
     
     def run_query(self, user_query: str):
-        """Execute a user query with full feature integration."""
+        """Execute a user query with critical features: reasoning, caching, anomaly detection."""
         try:
+            # ===== FEATURE 1: CHAIN-OF-THOUGHT REASONING =====
+            # Get schema context from cache file
+            schema_context = ""
+            if self.schema_cache_path.exists():
+                schema_context = self.schema_cache_path.read_text()
+            
+            analysis = self.reasoning.analyze(user_query, schema_context)
+            print(self.reasoning.format_reasoning_display(analysis))
+            
+            # ===== FEATURE 2: QUERY RESULT CACHING =====
+            # Check cache first
+            cached_result = self.cache.get(user_query)
+            if cached_result:
+                df, cache_status = cached_result
+                print(f"\n💾 Cache {cache_status}")
+                print(f"✅ Retrieved {len(df)} rows from cache (instant!)")
+                
+                # Store for later use
+                self.last_result = {"df": df, "user_query": user_query, "from_cache": True}
+                
+                # Display results
+                self._display_results(df, user_query, "<cached>", 0.0)
+                
+                # Still run anomaly detection on cached results
+                if self.anomaly_detector:
+                    anomalies = self.anomaly_detector.analyze(df)
+                    if anomalies:
+                        print(self.anomaly_detector.format_anomaly_report(anomalies))
+                
+                return
+            
+            print("\n💾 Cache: MISS - Executing fresh query")
+            
             # Start performance monitoring
             self.performance.start_query()
             
-            # Execute with retry logic
+            # Execute with retry logic (includes ENHANCED SQL SAFETY validation)
             df, sql = self.sql_agent.execute_with_retry(user_query)
             
             # Record performance
             execution_time = self.performance.end_query(sql, len(df), success=True)
             
-            # Display SQL used
-            print(f"\n📝 SQL Query Used:")
-            print("-" * 80)
-            print(sql)
-            print("-" * 80)
+            # Cache the result
+            self.cache.put(user_query, df)
+            
+            # Store for later use
+            self.last_result = {
+                "df": df,
+                "sql": sql,
+                "user_query": user_query,
+                "from_cache": False
+            }
             
             # Display results
-            print(f"\n📊 Results ({len(df)} rows) - Execution time: {execution_time:.2f}ms")
-            print("-" * 80)
+            self._display_results(df, user_query, sql, execution_time)
             
-            if df.empty:
-                print("No results found.")
-            else:
-                # Prepare DataFrame for display
-                df_display = df.fillna('')
-                
-                # Limit preview to first 20 rows for large datasets
-                preview_limit = 20
-                if len(df_display) > preview_limit:
-                    df_preview = df_display.head(preview_limit)
-                    print(f"Showing first {preview_limit} of {len(df)} rows:")
-                else:
-                    df_preview = df_display
-                
-                # Format table with tabulate
-                try:
-                    table = tabulate(
-                        df_preview,
-                        headers='keys',
-                        tablefmt='grid',
-                        showindex=False,
-                        maxcolwidths=30
-                    )
-                    print(table)
-                except Exception as e:
-                    print(f"⚠️  Table formatting error, showing raw data:")
-                    print(df_preview.to_string(max_rows=preview_limit, max_colwidth=30))
-            
-            print("-" * 80)
-            
-            # Save results and log to history
-            if not df.empty:
-                result_file = self._save_result_to_file(user_query, sql, df)
-                query_folder = self.current_query_folder
-                
-                # Log to history
-                query_id = self.history.add_query(
-                    user_query, sql, len(df), execution_time, str(query_folder)
-                )
-                
-                # Store for later use
-                self.last_result = {
-                    "query_id": query_id,
-                    "df": df,
-                    "sql": sql,
-                    "user_query": user_query
-                }
-                
-                print(f"\n💾 Results saved to folder: {query_folder.name}/")
-                print(f"   📄 result.md  - Formatted report")
-                print(f"   📊 result.csv - Full data")
-                print(f"   🆔 Query ID: {query_id} (use 'replay {query_id}' to re-run)")
-                
-                # Generate and display insights
-                if self.show_insights:
-                    try:
-                        insights = self.insights.analyze(df)
-                        print(self.insights.format_insights_report(insights))
-                    except Exception as e:
-                        print(f"⚠️  Could not generate insights: {e}")
-                
-                # Try to generate visualization
-                try:
-                    chart_path = self.visualizer.auto_visualize(df, user_query)
-                    if chart_path:
-                        import shutil
-                        new_chart_path = self.current_query_folder / "chart.png"
-                        shutil.move(chart_path, new_chart_path)
-                        print(f"   📈 chart.png  - Visualization")
-                    else:
-                        # Explain why no chart was generated
-                        if len(df.columns) < 2:
-                            print(f"ℹ️  No visualization: Query has only 1 column (need at least 2 for charts)")
-                        else:
-                            print(f"ℹ️  No suitable visualization detected for this data")
-                except Exception as e:
-                    print(f"⚠️  Could not generate visualization: {e}")
-                
-                # Show AI suggestions
-                try:
-                    suggestions = self.suggester.suggest_followups(user_query, df, sql)
-                    if suggestions:
-                        print(f"\n💡 You might also want to ask:")
-                        for i, suggestion in enumerate(suggestions[:3], 1):
-                            print(f"   {i}. {suggestion}")
-                except Exception as e:
-                    pass  # Silently skip if suggestions fail
+            # ===== FEATURE 3: ANOMALY DETECTION =====
+            if self.anomaly_detector and not df.empty:
+                anomalies = self.anomaly_detector.analyze(df)
+                if anomalies:
+                    print(self.anomaly_detector.format_anomaly_report(anomalies))
             
         except SafetyViolationError as e:
             print(f"\n{e}\n")
@@ -360,6 +337,108 @@ class BackupDBAgent:
         except Exception as e:
             print(f"\n❌ Error: {e}\n")
             self.performance.end_query("", 0, success=False)
+    
+    def _display_results(self, df: pd.DataFrame, user_query: str, sql: str, execution_time: float):
+        """Display query results with all features."""
+        import shutil
+        import pandas as pd
+        from tabulate import tabulate
+        
+        # Display SQL used (unless cached)
+        if sql != "<cached>":
+            print(f"\n📝 SQL Query Used:")
+            print("-" * 80)
+            print(sql)
+            print("-" * 80)
+            print(f"\n📊 Results ({len(df)} rows) - Execution time: {execution_time:.2f}ms")
+        else:
+            print(f"\n📊 Results ({len(df)} rows)")
+        
+        print("-" * 80)
+        
+        if df.empty:
+            print("No results found.")
+        else:
+            # Display preview
+            df_display = df.fillna('')
+            preview_limit = 20
+            if len(df_display) > preview_limit:
+                df_preview = df_display.head(preview_limit)
+                print(f"Showing first {preview_limit} of {len(df)} rows:")
+            else:
+                df_preview = df_display
+            
+            # Format table
+            try:
+                table = tabulate(
+                    df_preview,
+                    headers='keys',
+                    tablefmt='grid',
+                    showindex=False,
+                    maxcolwidths=30
+                )
+                print(table)
+            except Exception as e:
+                print(f"⚠️  Table formatting error, showing raw data:")
+                print(df_preview.to_string(max_rows=preview_limit, max_colwidth=30))
+        
+        print("-" * 80)
+        
+        # Save results and log to history (only for non-cached results)
+        if not df.empty and sql != "<cached>":
+            result_file = self._save_result_to_file(user_query, sql, df)
+            query_folder = self.current_query_folder
+            
+            # Log to history
+            query_id = self.history.add_query(
+                user_query, sql, len(df), execution_time, str(query_folder)
+            )
+            
+            # Store for later use
+            self.last_result = {
+                "query_id": query_id,
+                "df": df,
+                "sql": sql,
+                "user_query": user_query
+            }
+            
+            print(f"\n💾 Results saved to folder: {query_folder.name}/")
+            print(f"   📄 result.md  - Formatted report")
+            print(f"   📊 result.csv - Full data")
+            print(f"   🆔 Query ID: {query_id} (use 'replay {query_id}' to re-run)")
+            
+            # Generate and display insights
+            if self.show_insights:
+                try:
+                    insights = self.insights.analyze(df)
+                    print(self.insights.format_insights_report(insights))
+                except Exception as e:
+                    print(f"⚠️  Could not generate insights: {e}")
+            
+            # Try to generate visualization
+            try:
+                chart_path = self.visualizer.auto_visualize(df, user_query)
+                if chart_path:
+                    new_chart_path = self.current_query_folder / "chart.png"
+                    shutil.move(chart_path, new_chart_path)
+                    print(f"   📈 chart.png  - Visualization")
+                else:
+                    if len(df.columns) < 2:
+                        print(f"ℹ️  No visualization: Query has only 1 column (need at least 2 for charts)")
+                    else:
+                        print(f"ℹ️  No suitable visualization detected for this data")
+            except Exception as e:
+                print(f"⚠️  Could not generate visualization: {e}")
+            
+            # Show AI suggestions
+            try:
+                suggestions = self.suggester.suggest_followups(user_query, df, sql)
+                if suggestions:
+                    print(f"\n💡 You might also want to ask:")
+                    for i, suggestion in enumerate(suggestions[:3], 1):
+                        print(f"   {i}. {suggestion}")
+            except Exception as e:
+                pass  # Silently skip if suggestions fail
     
     def handle_command(self, command: str) -> bool:
         """Handle special commands. Returns True if command was handled, False if it's a regular query."""
@@ -418,14 +497,20 @@ class BackupDBAgent:
             return True
         
         # Performance stats
-        if cmd_lower in ['stats', 'performance']:
-            print(self.performance.format_report())
+        if cmd_lower == 'stats':
+            print(self.performance.format_performance_report())
+            return True
+        
+        # Cache stats
+        if cmd_lower == 'cache':
+            print(self.cache.format_stats_report())
             return True
         
         # Toggle insights
         if cmd_lower == 'insights':
             self.show_insights = not self.show_insights
-            print(f"✅ Insights display: {'ON' if self.show_insights else 'OFF'}")
+            status = "enabled" if self.show_insights else "disabled"
+            print(f"\n💡 Insights {status}")
             return True
         
         return False
